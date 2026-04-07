@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Database Service
+  mysql:
+    image: mysql:5.7
+    container_name: wp_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: wordpress_db
+      MYSQL_USER: wp_user
+      MYSQL_PASSWORD: wp_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - wp_network
+
+  # Redis Service
+  redis:
+    image: redis:alpine
+    container_name: wp_redis
+    restart: always
+    networks:
+      - wp_network
+
+  # WordPress Service
+  wordpress:
+    image: wordpress:latest
+    container_name: wp_site
+    restart: always
+    ports:
+      - "8000:80"
+    environment:
+      WORDPRESS_DB_HOST: mysql:3306
+      WORDPRESS_DB_NAME: wordpress_db
+      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_PASSWORD: wp_password
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - wordpress_files:/var/www/html
+    networks:
+      - wp_network
+
+volumes:
+  mysql_data:
+  wordpress_files:
+
+networks:
+  wp_network:
+    driver: bridge

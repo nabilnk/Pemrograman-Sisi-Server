@@ -37,7 +37,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'courses',
 ]
+
+AUTH_USER_MODEL = 'courses.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -75,8 +78,12 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'lms_db', # Sesuaikan dengan POSTGRES_DB di docker-compose
+        'USER': 'lms_user',
+        'PASSWORD': 'lms_password',
+        'HOST': 'db',
+        'PORT': '5432',
     }
 }
 

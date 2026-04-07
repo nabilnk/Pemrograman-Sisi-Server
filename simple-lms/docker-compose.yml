@@ -6,7 +6,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
-      - POSTGRES_DB=lms_db
+      - POSTGRES_DB=lms_db_final
       - POSTGRES_USER=lms_user
       - POSTGRES_PASSWORD=lms_password
     networks:
@@ -23,7 +23,7 @@ services:
     environment:
       - DEBUG=1
       - SECRET_KEY=django-insecure-key-lms-2026
-      - DB_NAME=lms_db
+      - DB_NAME=lms_db_final
       - DB_USER=lms_user
       - DB_PASS=lms_password
       - DB_HOST=db

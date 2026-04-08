@@ -17,8 +17,8 @@ Masalah N+1 terjadi ketika kita mengambil daftar objek (misal: Course) dan meman
 - **Dengan Optimasi (`select_related`)**: Hanya `1` Query (Sangat cepat karena menggunakan JOIN).
 
 ### Screenshot Progress 2
-1. **Django Admin Interface**: (Simpan di `screenshots/admin_dashboard.png`)
-2. **Query Optimization Result**: (Simpan di `screenshots/query_demo.png`)
+1. **Django Admin Interface**: (screenshoots/admin_dashboard.png)
+2. **Query Optimization Result**: (screenshoots/query_demo.png)
 3. **Data Fixtures JSON**: File tersedia di `courses/fixtures/data.json`.
 ```
 

@@ -1,26 +1,19 @@
-## Progress 2: Database Design & ORM
 
-### Implementasi Models
-- **Custom User**: Menggunakan `AbstractUser` dengan field `role` (admin, instructor, student).
-- **Relasi Database**: 
-    - `Course` ke `User` (Instructor) & `Category` menggunakan ForeignKey.
-    - `Enrollment` menggunakan `unique_together` untuk memastikan user tidak mendaftar kursus yang sama dua kali.
-    - `Category` menggunakan relasi `self-referencing` untuk mendukung kategori bertingkat (parent-child).
+## Progress 3: REST API & Authentication System
 
-### Optimasi Query (N+1 Problem)
-Masalah N+1 terjadi ketika kita mengambil daftar objek (misal: Course) dan memanggil data relasinya (misal: Instructor) di dalam loop, sehingga memicu query database berulang kali.
+### Fitur Utama:
+- **Django Ninja**: Framework API performa tinggi dengan validasi Pydantic.
+- **JWT Authentication**: Menggunakan `django-ninja-jwt` untuk sistem token (Access & Refresh).
+- **RBAC (Role-Based Access Control)**: Implementasi hak akses berdasarkan role (Admin, Instructor, Student).
+- **Swagger Documentation**: Dokumentasi API otomatis yang dapat diakses di `/api/docs`.
 
-**Solusi:** Menggunakan `select_related` untuk Foreign Key (SQL JOIN).
+### Cara Menjalankan API:
+1. Pastikan container berjalan: `docker-compose up -d`
+2. Buka `http://localhost:8000/api/docs` untuk melihat dokumentasi.
+3. Untuk endpoint yang diproteksi, gunakan token dari `/api/token/pair` dan masukkan ke tombol **Authorize** dengan format: `Bearer <token_anda>`.
 
-#### Perbandingan Hasil Query Demo:
-- **Tanpa Optimasi**: `N+1` Query (Makin banyak data, makin berat).
-- **Dengan Optimasi (`select_related`)**: Hanya `1` Query (Sangat cepat karena menggunakan JOIN).
-
-### Screenshot Progress 2
-1. **Django Admin Interface**:
-![Admin Dashboard](screenshoots/admin_dashboard.png)
-2. **Query Optimization Result**:
-![Query Demo](screenshoots/query_demo.png)
-3. **Data Fixtures JSON**: File tersedia di `courses/fixtures/data.json`.
-```
+### Deliverables:
+- Postman Collection: `LMS_API.postman_collection.json` (terlampir di repository).
+- Screenshot Swagger: `screenshots/swagger_docs.png`.
+![image](screenshoots/swagger_docs.png)
 

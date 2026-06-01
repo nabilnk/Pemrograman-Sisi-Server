@@ -1,51 +1,289 @@
-from ninja_extra import NinjaExtraAPI
-from ninja_jwt.controller import NinjaJWTDefaultController
-from ninja_jwt.authentication import JWTAuth
-from django.contrib.auth import get_user_model
-from django.shortcuts import get_object_or_404
-from .models import Course, Enrollment, Category
-from .schemas import UserOut, RegisterIn, CourseOut, CourseIn
 from typing import List
 
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.conf import settings
+
+from ninja_jwt.authentication import JWTAuth
+from ninja_jwt.controller import NinjaJWTDefaultController
+from ninja_extra import NinjaExtraAPI
+
+from .models import Category, Course, Enrollment
+from .schemas import CourseIn, CourseOut, RegisterIn, UserOut
+from .tasks import (
+    export_course_report,
+    generate_certificate,
+    send_enrollment_email,
+    update_course_statistics,
+)
+
 User = get_user_model()
+
 api = NinjaExtraAPI()
 api.register_controllers(NinjaJWTDefaultController)
 
-# --- AUTH ---
-@api.post("/auth/register", response=UserOut, tags=["Auth"])
+
+def get_client_ip(request):
+    forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if forwarded_for:
+        return forwarded_for.split(',')[0]
+    return request.META.get('REMOTE_ADDR', 'unknown')
+
+
+def check_rate_limit(request, limit=60, window=60):
+    ip = get_client_ip(request)
+    cache_key = f"rate_limit:{ip}"
+
+    current = cache.get(cache_key, 0)
+
+    if current >= limit:
+        return False
+
+    if current == 0:
+        cache.set(cache_key, 1, timeout=window)
+    else:
+        cache.incr(cache_key)
+
+    return True
+
+
+def log_activity(request, action, metadata=None):
+    metadata = metadata or {}
+
+    username = 'anonymous'
+    if getattr(request, 'user', None) and request.user.is_authenticated:
+        username = request.user.username
+
+    settings.MONGO_DB.activity_logs.insert_one({
+        "user": username,
+        "action": action,
+        "metadata": metadata,
+        "created_at": timezone.now().isoformat(),
+    })
+
+
+@api.post('/auth/register', response=UserOut, tags=['Auth'])
 def register(request, data: RegisterIn):
-    user = User.objects.create_user(**data.dict())
+    user = User.objects.create_user(
+        username=data.username,
+        password=data.password,
+        email=data.email,
+        role=data.role,
+    )
+
+    log_activity(request, 'register_user', {
+        "username": user.username,
+        "role": user.role
+    })
+
     return user
 
-@api.get("/auth/me", response=UserOut, auth=JWTAuth(), tags=["Auth"])
+
+@api.get('/auth/me', response=UserOut, auth=JWTAuth(), tags=['Auth'])
 def me(request):
     return request.user
 
-# --- COURSES ---
-@api.get("/courses", response=List[CourseOut], tags=["Courses"])
-def list_courses(request):
-    return Course.objects.select_related('instructor', 'category').all()
 
-@api.post("/courses", response=CourseOut, auth=JWTAuth(), tags=["Courses"])
+@api.get('/courses', response=List[CourseOut], tags=['Courses'])
+def list_courses(request):
+    if not check_rate_limit(request):
+        return api.create_response(
+            request,
+            {"detail": "Rate limit exceeded. Maksimal 60 request per menit."},
+            status=429
+        )
+
+    cache_key = 'courses:list'
+    cached_courses = cache.get(cache_key)
+
+    if cached_courses is not None:
+        log_activity(request, 'view_course_list_cached')
+        return cached_courses
+
+    courses = list(Course.objects.select_related('instructor', 'category').all())
+
+    cache.set(cache_key, courses, timeout=600)
+
+    log_activity(request, 'view_course_list')
+
+    return courses
+
+
+@api.get('/courses/{course_id}', response=CourseOut, tags=['Courses'])
+def course_detail(request, course_id: int):
+    if not check_rate_limit(request):
+        return api.create_response(
+            request,
+            {"detail": "Rate limit exceeded. Maksimal 60 request per menit."},
+            status=429
+        )
+
+    cache_key = f'courses:detail:{course_id}'
+    cached_course = cache.get(cache_key)
+
+    if cached_course is not None:
+        log_activity(request, 'view_course_detail_cached', {
+            "course_id": course_id
+        })
+        return cached_course
+
+    course = get_object_or_404(
+        Course.objects.select_related('instructor', 'category'),
+        id=course_id
+    )
+
+    cache.set(cache_key, course, timeout=600)
+
+    log_activity(request, 'view_course_detail', {
+        "course_id": course_id
+    })
+
+    return course
+
+
+@api.post('/courses', response=CourseOut, auth=JWTAuth(), tags=['Courses'])
 def create_course(request, data: CourseIn):
     if request.user.role != 'instructor':
-        return api.create_response(request, {"detail": "Hanya Instructor yang diizinkan"}, status=403)
-    
+        return api.create_response(
+            request,
+            {"detail": "Hanya instructor yang diizinkan membuat course."},
+            status=403
+        )
+
     category = get_object_or_404(Category, id=data.category_id)
+
     course = Course.objects.create(
         title=data.title,
         description=data.description,
         instructor=request.user,
-        category=category
+        category=category,
     )
+
+    cache.delete('courses:list')
+
+    log_activity(request, 'create_course', {
+        "course_id": course.id,
+        "title": course.title
+    })
+
     return course
 
-# --- ENROLLMENTS ---
-@api.post("/enrollments/{course_id}", auth=JWTAuth(), tags=["Enrollments"])
+
+@api.post('/enrollments/{course_id}', auth=JWTAuth(), tags=['Enrollments'])
 def enroll_course(request, course_id: int):
     if request.user.role != 'student':
-        return api.create_response(request, {"detail": "Hanya Student yang bisa daftar"}, status=403)
-    
+        return api.create_response(
+            request,
+            {"detail": "Hanya student yang bisa daftar course."},
+            status=403
+        )
+
     course = get_object_or_404(Course, id=course_id)
-    enrollment, created = Enrollment.objects.get_or_create(student=request.user, course=course)
-    return {"message": "Berhasil daftar", "enrollment_id": enrollment.id}
+
+    enrollment, created = Enrollment.objects.get_or_create(
+        student=request.user,
+        course=course
+    )
+
+    if created:
+        send_enrollment_email.delay(request.user.email, course.title)
+        update_course_statistics.delay()
+
+        log_activity(request, 'enroll_course', {
+            "course_id": course.id,
+            "enrollment_id": enrollment.id
+        })
+
+    return {
+        "message": "Berhasil daftar course" if created else "Student sudah terdaftar pada course ini",
+        "enrollment_id": enrollment.id,
+    }
+
+
+@api.post('/enrollments/{enrollment_id}/complete', auth=JWTAuth(), tags=['Enrollments'])
+def complete_course(request, enrollment_id: int):
+    enrollment = get_object_or_404(
+        Enrollment,
+        id=enrollment_id,
+        student=request.user
+    )
+
+    generate_certificate.delay(enrollment.id)
+
+    log_activity(request, 'complete_course', {
+        "enrollment_id": enrollment.id,
+        "course_id": enrollment.course_id
+    })
+
+    return {
+        "message": "Course selesai. Certificate sedang dibuat di background."
+    }
+
+
+@api.post('/reports/courses/export', auth=JWTAuth(), tags=['Reports'])
+def request_course_report(request):
+    if request.user.role != 'admin':
+        return api.create_response(
+            request,
+            {"detail": "Hanya admin yang bisa export report."},
+            status=403
+        )
+
+    task = export_course_report.delay()
+
+    log_activity(request, 'request_course_report', {
+        "task_id": task.id
+    })
+
+    return {
+        "message": "Report sedang dibuat secara asynchronous.",
+        "task_id": task.id
+    }
+
+
+@api.get('/reports/course-statistics', auth=JWTAuth(), tags=['Reports'])
+def course_statistics(request):
+    if request.user.role != 'admin':
+        return api.create_response(
+            request,
+            {"detail": "Hanya admin yang bisa melihat analytics."},
+            status=403
+        )
+
+    pipeline = [
+        {"$sort": {"enrollment_count": -1}},
+        {
+            "$project": {
+                "_id": 0,
+                "course_id": 1,
+                "course_title": 1,
+                "enrollment_count": 1,
+                "updated_at": 1
+            }
+        },
+    ]
+
+    data = list(settings.MONGO_DB.learning_analytics.aggregate(pipeline))
+
+    return {
+        "data": data
+    }
+
+
+@api.post('/tasks/update-course-statistics', auth=JWTAuth(), tags=['Tasks'])
+def run_update_course_statistics(request):
+    if request.user.role != 'admin':
+        return api.create_response(
+            request,
+            {"detail": "Hanya admin yang bisa menjalankan task ini."},
+            status=403
+        )
+
+    task = update_course_statistics.delay()
+
+    return {
+        "message": "Task update course statistics dijalankan.",
+        "task_id": task.id
+    }

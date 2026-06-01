@@ -3,5 +3,10 @@ psycopg2-binary
 python-dotenv
 django-ninja
 django-ninja-jwt
-django-ninja-extra
+django-ninja-extra==0.21.0
 email-validator
+celery==5.3.6
+redis==5.0.1
+django-redis==5.4.0
+pymongo==4.6.1
+flower==2.0.1

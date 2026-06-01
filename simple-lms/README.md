@@ -1,19 +1,43 @@
+# Simple LMS - Progress 4
 
-## Progress 3: REST API & Authentication System
+Project ini merupakan lanjutan dari Simple LMS untuk mata kuliah Pemrograman Server. Pada progress 4, sistem dikembangkan dengan fitur Redis caching, MongoDB activity logging, Celery asynchronous task, RabbitMQ message broker, dan Flower monitoring.
 
-### Fitur Utama:
-- **Django Ninja**: Framework API performa tinggi dengan validasi Pydantic.
-- **JWT Authentication**: Menggunakan `django-ninja-jwt` untuk sistem token (Access & Refresh).
-- **RBAC (Role-Based Access Control)**: Implementasi hak akses berdasarkan role (Admin, Instructor, Student).
-- **Swagger Documentation**: Dokumentasi API otomatis yang dapat diakses di `/api/docs`.
+## Fitur Progress 4
 
-### Cara Menjalankan API:
-1. Pastikan container berjalan: `docker-compose up -d`
-2. Buka `http://localhost:8000/api/docs` untuk melihat dokumentasi.
-3. Untuk endpoint yang diproteksi, gunakan token dari `/api/token/pair` dan masukkan ke tombol **Authorize** dengan format: `Bearer <token_anda>`.
+### 1. Redis Integration
+- Course list caching
+- Course detail caching
+- Cache invalidation ketika instructor membuat course baru
+- Rate limiting sederhana 60 request per menit per IP
 
-### Deliverables:
-- Postman Collection: `LMS_API.postman_collection.json` (terlampir di repository).
-- Screenshot Swagger: `screenshots/swagger_docs.png`.
-![image](screenshoots/swagger_docs.png)
+### 2. MongoDB Integration
+- Activity logs disimpan ke collection `activity_logs`
+- Learning analytics disimpan ke collection `learning_analytics`
+- Aggregation query untuk laporan statistik course
 
+### 3. Celery Tasks
+- `send_enrollment_email`
+- `generate_certificate`
+- `update_course_statistics`
+- `export_course_report`
+
+### 4. RabbitMQ
+RabbitMQ digunakan sebagai message broker untuk Celery.
+
+### 5. Flower
+Flower digunakan untuk monitoring task Celery.
+
+## Arsitektur Sistem
+
+```mermaid
+flowchart TD
+    User[User / Client] --> Web[Django Web API]
+    Web --> Postgres[(PostgreSQL)]
+    Web --> Redis[(Redis Cache)]
+    Web --> MongoDB[(MongoDB)]
+    Web --> RabbitMQ[RabbitMQ Broker]
+    RabbitMQ --> Worker[Celery Worker]
+    Worker --> MongoDB
+    Worker --> Postgres
+    Beat[Celery Beat Scheduler] --> RabbitMQ
+    Flower[Flower Monitoring] --> RabbitMQ

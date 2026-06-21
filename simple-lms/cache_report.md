@@ -133,7 +133,7 @@ docker compose up -d redis
 
 Screenshot:
 
-![Redis Running](images/redis-running.png)
+![Redis Running](screenshoots/redis-running.png)
 
 ---
 
@@ -153,7 +153,7 @@ PONG
 
 Screenshot:
 
-![Redis Ping](images/redis-ping.png)
+![Redis Ping](screenshoots/redis-ping.png)
 
 ---
 
@@ -167,7 +167,7 @@ python test_cache.py
 
 Screenshot:
 
-![Cache Test](images/cache-test.png)
+![Cache Test](screenshoots/cache-test.png)
 
 ---
 

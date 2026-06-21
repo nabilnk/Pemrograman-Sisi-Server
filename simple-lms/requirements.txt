@@ -10,3 +10,5 @@ redis==5.0.1
 django-redis==5.4.0
 pymongo==4.6.1
 flower==2.0.1
+redis
+requests

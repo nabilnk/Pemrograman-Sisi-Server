@@ -1,9 +1,17 @@
+venv/
 __pycache__/
 *.pyc
-.env
+*.pyo
+*.pyd
 
-generated/
+.env
+db.sqlite3
 celerybeat-schedule
 
-venv/
-.venv/
+generated/
+media/
+staticfiles/
+
+.DS_Store
+.idea/
+.vscode/

@@ -5,13 +5,31 @@ from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
+from celery.result import AsyncResult
 
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.controller import NinjaJWTDefaultController
 from ninja_extra import NinjaExtraAPI
 
-from .models import Category, Course, Enrollment
-from .schemas import CourseIn, CourseOut, RegisterIn, UserOut
+from .models import (
+    Category,
+    Course,
+    Enrollment,
+    Lesson,
+    Progress,
+)
+
+from .schemas import (
+    CategoryOut,
+    CourseIn,
+    CourseOut,
+    RegisterIn,
+    UserOut,
+    LessonOut,
+    ProgressOut,
+    ProgressUpdateIn,
+)
+
 from .tasks import (
     export_course_report,
     generate_certificate,
@@ -66,6 +84,20 @@ def log_activity(request, action, metadata=None):
 
 @api.post('/auth/register', response=UserOut, tags=['Auth'])
 def register(request, data: RegisterIn):
+    if User.objects.filter(username=data.username).exists():
+        return api.create_response(
+            request,
+            {"detail": "Username sudah digunakan."},
+            status=400
+        )
+
+    if User.objects.filter(email=data.email).exists():
+        return api.create_response(
+            request,
+            {"detail": "Email sudah digunakan."},
+            status=400
+        )
+
     user = User.objects.create_user(
         username=data.username,
         password=data.password,
@@ -85,6 +117,9 @@ def register(request, data: RegisterIn):
 def me(request):
     return request.user
 
+@api.get('/categories', response=List[CategoryOut], tags=['Categories'])
+def list_categories(request):
+    return list(Category.objects.all())
 
 @api.get('/courses', response=List[CourseOut], tags=['Courses'])
 def list_courses(request):
@@ -287,3 +322,152 @@ def run_update_course_statistics(request):
         "message": "Task update course statistics dijalankan.",
         "task_id": task.id
     }
+
+@api.get(
+    "/courses/{course_id}/lessons",
+    response=List[LessonOut],
+    tags=["Lessons"]
+)
+def course_lessons(request, course_id: int):
+
+    course = get_object_or_404(Course, id=course_id)
+
+    return list(
+        Lesson.objects.filter(course=course)
+        .order_by("order")
+    )
+
+@api.post(
+    "/progress/complete",
+    response=dict,
+    auth=JWTAuth(),
+    tags=["Progress"]
+)
+def complete_lesson(request, data: ProgressUpdateIn):
+
+    lesson = get_object_or_404(
+        Lesson,
+        id=data.lesson_id
+    )
+
+    enrollment = Enrollment.objects.filter(
+        student=request.user,
+        course=lesson.course
+    ).first()
+
+    if not enrollment:
+        return api.create_response(
+            request,
+            {"detail": "Anda belum terdaftar pada course ini."},
+            status=403
+        )
+
+    progress, created = Progress.objects.get_or_create(
+        enrollment=enrollment,
+        lesson=lesson
+    )
+
+    progress.is_completed = True
+    progress.save()
+
+    log_activity(request, "complete_lesson", {
+        "lesson_id": lesson.id,
+        "course_id": lesson.course.id
+    })
+
+    return {
+        "message": "Lesson berhasil diselesaikan"
+    }
+
+@api.get(
+    "/my-progress",
+    auth=JWTAuth(),
+    tags=["Progress"]
+)
+def my_progress(request):
+
+    progress = Progress.objects.filter(
+        enrollment__student=request.user
+    ).select_related(
+        "lesson",
+        "enrollment",
+        "enrollment__course"
+    )
+
+    return [
+        {
+            "course": p.enrollment.course.title,
+            "lesson": p.lesson.title,
+            "completed": p.is_completed
+        }
+        for p in progress
+    ]
+
+@api.get(
+    "/tasks/{task_id}/status",
+    auth=JWTAuth(),
+    tags=["Tasks"]
+)
+def task_status(request, task_id: str):
+
+    task = AsyncResult(task_id)
+
+    response = {
+        "task_id": task_id,
+        "status": task.status,
+        "ready": task.ready(),
+        "successful": task.successful() if task.ready() else False,
+    }
+
+    if task.ready():
+        if task.successful():
+            response["result"] = task.result
+        else:
+            response["error"] = str(task.result)
+
+    return response
+
+@api.get(
+    "/activity-logs",
+    auth=JWTAuth(),
+    tags=["Analytics"]
+)
+def activity_logs(request):
+
+    if request.user.role != "admin":
+        return api.create_response(
+            request,
+            {"detail": "Hanya admin yang bisa melihat activity logs."},
+            status=403
+        )
+
+    logs = list(
+        settings.MONGO_DB.activity_logs
+        .find({}, {"_id": 0})
+        .sort("created_at", -1)
+        .limit(50)
+    )
+
+    return {
+        "data": logs
+    }
+
+@api.get(
+    "/my-enrollments",
+    auth=JWTAuth(),
+    tags=["Enrollments"]
+)
+def my_enrollments(request):
+    enrollments = Enrollment.objects.filter(
+        student=request.user
+    ).select_related("course")
+
+    return [
+        {
+            "id": enrollment.id,
+            "course_id": enrollment.course.id,
+            "course_title": enrollment.course.title,
+            "enrolled_at": enrollment.enrolled_at
+        }
+        for enrollment in enrollments
+    ]
